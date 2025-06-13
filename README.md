@@ -1,40 +1,4 @@
-[![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-22041afd0340ce965d47ae6ef1cefeee28c7c493a6346c4f15d667ab976d596c.svg)](https://classroom.github.com/a/SdXSjEmH)
-# EV-HW3: PhysGaussian
-
-This homework is based on the recent CVPR 2024 paper [PhysGaussian](https://github.com/XPandora/PhysGaussian/tree/main), which introduces a novel framework that integrates physical constraints into 3D Gaussian representations for modeling generative dynamics.
-
-You are **not required** to implement training from scratch. Instead, your task is to set up the environment as specified in the official repository and run the simulation scripts to observe and analyze the results.
-
-
-## Getting the Code from the Official PhysGaussian GitHub Repository
-Download the official codebase using the following command:
-```
-git clone https://github.com/XPandora/PhysGaussian.git
-```
-
-
-## Environment Setup
-Navigate to the "PhysGaussian" directory and follow the instructions under the "Python Environment" section in the official README to set up the environment.
-
-
-## Running the Simulation
-Follow the "Quick Start" section and execute the simulation scripts as instructed. Make sure to verify your outputs and understand the role of physics constraints in the generated dynamics.
-
-
-## Homework Instructions
-Please complete Part 1–2 as described in the [Google Slides](https://docs.google.com/presentation/d/13JcQC12pI8Wb9ZuaVV400HVZr9eUeZvf7gB7Le8FRV4/edit?usp=sharing).
-
-
-# Reference
-```bibtex
-@inproceedings{xie2024physgaussian,
-    title     = {Physgaussian: Physics-integrated 3d gaussians for generative dynamics},
-    author    = {Xie, Tianyi and Zong, Zeshun and Qiu, Yuxing and Li, Xuan and Feng, Yutao and Yang, Yin and Jiang, Chenfanfu},
-    booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
-    year      = {2024}
-}
-```
-
+# PhysGaussian MPM Simulation Ablation Report
 ## Jelly
 ### Parameter Adjustments
 
@@ -125,3 +89,49 @@ Through systematic parameter ablation, I discovered several important behaviors 
 * Softening had no effect on jelly (elastic), as expected.
 * Grid damping and substep timestep had a more pronounced visual and numerical impact on jelly than sand, due to its bouncier dynamics.
 * The system properly handled different constitutive models depending on the material, which validates the parameter-specific behavior.
+
+## Extension to PhysGaussian: Material-Aware Multi-View Integration
+
+To overcome the limitation of manually defined material parameters and enable support for real-world, mixed-material objects, we introduced a new material-aware data pipeline and simulation framework with the following components:
+
+---
+
+### 1. Multi-view Semantic Segmentation via *GaussianProperty*
+
+we leveraged the **GaussianProperty** paper to generate **multi-view material masks**. These masks are produced using either text-guided semantic segmentation models or class-specific segmentation, enabling automatic labeling of material categories (e.g., *sand*, *metal*, *jelly*) across views.
+
+---
+
+### 2. Gaussian Projection with Occlusion-aware Label Assignment
+
+To associate each 3D Gaussian with a material label:
+
+* **Projection**: Each Gaussian center is projected into every image using known **camera intrinsics/extrinsics**.
+* **Depth Sorting**: Projection is conducted **front-to-back**, so nearer Gaussians occlude farther ones.
+* **Pixel Assignment Cap**: Each pixel can only assign labels to a limited number of Gaussians (e.g., top-1 to top-3), preventing over-labeling and ensuring that **occluded Gaussians are filtered out**.
+* **Visibility-aware Voting**: For each Gaussian, we collect votes from visible views to determine the most likely material label.
+* **KNN-based Completion**: For Gaussians not projected in any view (e.g., internal points), we use **K-Nearest Neighbor interpolation** from labeled neighbors in Euclidean space.
+* **Instance Separation**: After labeling, Gaussians are **grouped by material class** and exported as **multiple `.ply` files**, each with an accompanying `parameter.json`.
+
+This stage ensures accurate and complete per-Gaussian material classification, with occlusion handling and robust completion.
+
+---
+
+### 3. Unity-based Manual Material Refinement
+
+If users wish to further customize the material parameters or simulation configuration, they can import the separated `.ply` files along with their corresponding `parameter.json` files into **Unity**, where:
+
+* Users can **manually tweak physical parameters** (e.g., elasticity, friction, yield stress) per region or object.
+* External forces, constraints, or interactions can be defined in a visual interface to test behavior under specific conditions.
+* The final modified parameters are exported back to `.json` for simulation use.
+
+---
+
+### 4. Per-Particle MPM Simulation with Full Material Support
+
+we extended the simulation pipeline (`gs_simulation.py`) and the MPM solver (`MPM_Simulator_WARP`) to fully support:
+
+* **Loading multiple `.ply` + `parameter.json` pairs**, merging all Gaussians into a single particle set.
+* Assigning **per-particle physical parameters** such as `E`, `nu`, `density`, `softening`, `yield_stress`, `plastic_viscosity`, etc.
+* Selecting the correct **constitutive model** (e.g., elastic, sand, water) based on each particle’s material type.
+* Running unified simulation with mixed-material interaction.
